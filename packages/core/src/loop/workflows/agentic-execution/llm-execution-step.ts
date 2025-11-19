@@ -488,49 +488,61 @@ export function createLLMExecutionStep<Tools extends ToolSet = ToolSet, OUTPUT e
             let stepToolChoice = toolChoice;
             let stepTools = tools;
 
-            if (options?.prepareStep) {
-              try {
-                const prepareStepResult = await options.prepareStep({
-                  stepNumber: inputData.output?.steps?.length || 0,
-                  steps: inputData.output?.steps || [],
-                  model,
-                  messages: messageList.get.all.aiV5.model(),
-                });
+              if (options?.prepareStep) {
+                try {
+                  const prepareStepResult = await options.prepareStep({
+                    stepNumber: inputData.output?.steps?.length || 0,
+                    steps: inputData.output?.steps || [],
+                    model,
+                    messages: messageList.get.all.aiV5.prompt(),
+                  });
 
-                if (prepareStepResult) {
-                  if (prepareStepResult.model) {
-                    stepModel = prepareStepResult.model;
-                  }
-                  if (prepareStepResult.toolChoice) {
-                    stepToolChoice = prepareStepResult.toolChoice;
-                  }
-                  if (prepareStepResult.activeTools && stepTools) {
-                    const activeToolsSet = new Set(prepareStepResult.activeTools);
-                    stepTools = Object.fromEntries(
-                      Object.entries(stepTools).filter(([toolName]) => activeToolsSet.has(toolName)),
-                    ) as typeof tools;
-                  }
-                  if (prepareStepResult.messages) {
-                    const newMessages = prepareStepResult.messages;
-                    const newMessageList = new MessageList();
-
-                    for (const message of newMessages) {
-                      if (message.role === 'system') {
-                        newMessageList.addSystem(message);
-                      } else if (message.role === 'user') {
-                        newMessageList.add(message, 'input');
-                      } else if (message.role === 'assistant' || message.role === 'tool') {
-                        newMessageList.add(message, 'response');
-                      }
+                  if (prepareStepResult) {
+                    if (prepareStepResult.model) {
+                      stepModel = prepareStepResult.model;
                     }
+                    if (prepareStepResult.toolChoice) {
+                      stepToolChoice = prepareStepResult.toolChoice;
+                    }
+                    if (prepareStepResult.activeTools && stepTools) {
+                      const activeToolsSet = new Set(prepareStepResult.activeTools);
+                      stepTools = Object.fromEntries(
+                        Object.entries(stepTools).filter(([toolName]) => activeToolsSet.has(toolName)),
+                      ) as typeof tools;
+                    }
+                    if (prepareStepResult.messages) {
+                      const newMessages = prepareStepResult.messages;
+                      const newMessageList = new MessageList();
 
-                    inputMessages = await newMessageList.get.all.aiV5.llmPrompt(messageListPromptArgs);
+                      const baseSystemMessages = messageList.getSystemMessages() ?? [];
+                      if (baseSystemMessages.length) {
+                        newMessageList.addSystem(baseSystemMessages);
+                      }
+
+                      const taggedSystemMessages = messageList.getPersisted.taggedSystemMessages ?? {};
+                      for (const [tag, taggedMessages] of Object.entries(taggedSystemMessages)) {
+                        if (taggedMessages?.length) {
+                          newMessageList.addSystem(taggedMessages, tag);
+                        }
+                      }
+
+                      for (const message of newMessages) {
+                        if (message.role === 'system') {
+                          newMessageList.addSystem(message);
+                        } else if (message.role === 'user') {
+                          newMessageList.add(message, 'input');
+                        } else if (message.role === 'assistant' || message.role === 'tool') {
+                          newMessageList.add(message, 'response');
+                        }
+                      }
+
+                      inputMessages = await newMessageList.get.all.aiV5.llmPrompt(messageListPromptArgs);
+                    }
                   }
+                } catch (error) {
+                  console.error('Error in prepareStep callback:', error);
                 }
-              } catch (error) {
-                console.error('Error in prepareStep callback:', error);
               }
-            }
 
             modelResult = execute({
               runId,

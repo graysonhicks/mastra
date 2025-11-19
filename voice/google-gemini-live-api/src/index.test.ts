@@ -4,6 +4,8 @@ import { GeminiLiveVoice } from './index';
 
 // Mock WebSocket
 let mockWsInstance: any;
+let mockWsUrl: string | undefined;
+let mockWsOptions: any;
 
 vi.mock('ws', () => {
   class MockWebSocket {
@@ -19,8 +21,10 @@ vi.mock('ws', () => {
     emit = vi.fn();
     readyState = 1;
 
-    constructor() {
+    constructor(url?: string, _protocols?: any, options?: any) {
       mockWsInstance = this;
+      mockWsUrl = url;
+      mockWsOptions = options;
       return this;
     }
   }
@@ -60,6 +64,8 @@ describe('GeminiLiveVoice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWsInstance = null;
+    mockWsUrl = undefined;
+    mockWsOptions = undefined;
 
     // Create voice instance with test config
     voice = new GeminiLiveVoice({
@@ -126,6 +132,69 @@ describe('GeminiLiveVoice', () => {
           vertexAI: true,
         });
       }).toThrow('Google Cloud project ID is required');
+    });
+  });
+
+  describe('Vertex AI mode', () => {
+    const vertexModelPath = 'projects/my-project/locations/us-east5/publishers/google/models/gemini-2.0-flash-live-001';
+
+    it('uses the Vertex AI WebSocket endpoint when vertexAI is enabled', async () => {
+      const vertexVoice = new GeminiLiveVoice({
+        vertexAI: true,
+        project: 'test-project',
+        location: 'us-east5',
+      });
+
+      vi.spyOn((vertexVoice as any).connectionManager, 'waitForOpen').mockResolvedValue(undefined as any);
+      (vertexVoice as any).waitForSessionCreated = vi.fn().mockResolvedValue(undefined);
+
+      await vertexVoice.connect();
+
+      expect(mockWsUrl).toBe(
+        'wss://us-east5-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent',
+      );
+
+      await vertexVoice.disconnect();
+    });
+
+    it('uses the provided Vertex AI model path without adding a models/ prefix', async () => {
+      const vertexVoice = new GeminiLiveVoice({
+        vertexAI: true,
+        project: 'test-project',
+        location: 'us-east5',
+        model: vertexModelPath,
+      });
+
+      vi.spyOn((vertexVoice as any).connectionManager, 'waitForOpen').mockResolvedValue(undefined as any);
+      (vertexVoice as any).waitForSessionCreated = vi.fn().mockResolvedValue(undefined);
+
+      await vertexVoice.connect();
+
+      const ws = (vertexVoice as any).connectionManager.getWebSocket() as any;
+      const payloads = ws.send.mock.calls.map((call: any[]) => JSON.parse(call[0]));
+      const setupMsg = payloads.find((payload: any) => payload.setup);
+
+      expect(setupMsg?.setup?.model).toBe(vertexModelPath);
+
+      await vertexVoice.disconnect();
+    });
+
+    it('continues to use the Live API endpoint and model prefix when vertexAI is disabled', async () => {
+      vi.spyOn((voice as any).connectionManager, 'waitForOpen').mockResolvedValue(undefined as any);
+      (voice as any).waitForSessionCreated = vi.fn().mockResolvedValue(undefined);
+
+      await voice.connect();
+
+      expect(mockWsUrl).toBe(
+        'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent',
+      );
+
+      const ws = (voice as any).connectionManager.getWebSocket() as any;
+      const payloads = ws.send.mock.calls.map((call: any[]) => JSON.parse(call[0]));
+      const setupMsg = payloads.find((payload: any) => payload.setup);
+      expect(setupMsg?.setup?.model).toBe('models/gemini-2.0-flash-live-001');
+
+      await voice.disconnect();
     });
   });
 

@@ -428,7 +428,9 @@ export class GeminiLiveVoice extends MastraVoice<
 
       if (this.options.vertexAI) {
         // Vertex AI endpoint
-        wsUrl = `wss://${this.options.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.PredictionService.ServerStreamingPredict`;
+        const location = this.options.location || 'us-central1';
+        this.options.location = location;
+        wsUrl = `wss://${location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
         // Initialize auth and get token
         await this.authManager.initialize();
         const accessToken = await this.authManager.getAccessToken();
@@ -1736,9 +1738,13 @@ export class GeminiLiveVoice extends MastraVoice<
     }
 
     // Build the Live API setup message
+    const configuredModel = this.options.model || DEFAULT_MODEL;
+    const modelPath =
+      this.options.vertexAI || configuredModel.startsWith('models/') ? configuredModel : `models/${configuredModel}`;
+
     const setupMessage: { setup: LiveGenerateContentSetup } = {
       setup: {
-        model: `models/${this.options.model}`,
+        model: modelPath,
       },
     };
 

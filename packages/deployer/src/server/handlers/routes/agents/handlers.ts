@@ -110,11 +110,16 @@ export async function getProvidersHandler(c: Context) {
 
     // Check each provider in the registry
     for (const [providerId, config] of Object.entries(PROVIDER_REGISTRY as Record<string, ProviderConfig>)) {
-      const hasApiKey = !!(typeof config.apiKeyEnvVar === `string`
-        ? process.env[config.apiKeyEnvVar]
-        : Array.isArray(config.apiKeyEnvVar)
-          ? config.apiKeyEnvVar.every((k: string) => !!process.env[k])
-          : false);
+      const requiredEnvVars =
+        config.requiredEnvVars && config.requiredEnvVars.length
+          ? config.requiredEnvVars
+          : Array.isArray(config.apiKeyEnvVar)
+            ? config.apiKeyEnvVar
+            : config.apiKeyEnvVar
+              ? [config.apiKeyEnvVar]
+              : [];
+
+      const hasApiKey = requiredEnvVars.every(envVar => (envVar ? !!process.env[envVar] : false));
 
       const providerConfig = getProviderConfig(providerId);
 

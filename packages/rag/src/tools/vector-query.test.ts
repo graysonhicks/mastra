@@ -236,38 +236,55 @@ describe('createVectorQueryTool', () => {
       );
     });
 
-    it('should handle string filters correctly', async () => {
-      const requestContext = new RequestContext();
-      // Create tool with enableFilter set to true
-      const tool = createVectorQueryTool({
-        vectorStoreName: 'testStore',
-        indexName: 'testIndex',
-        model: mockModel,
-        enableFilter: true,
+      it('throws when filter is an invalid JSON string', async () => {
+        const requestContext = new RequestContext();
+        const tool = createVectorQueryTool({
+          vectorStoreName: 'testStore',
+          indexName: 'testIndex',
+          model: mockModel,
+          enableFilter: true,
+        });
+
+        await expect(
+          tool.execute?.(
+            {
+              queryText: 'test query',
+              topK: 5,
+              filter: 'string-filter',
+            },
+            {
+              mastra: mockMastra as any,
+              requestContext,
+            },
+          ),
+        ).rejects.toThrow(/Invalid filter parameter/);
+        expect(vectorQuerySearch).not.toHaveBeenCalled();
       });
 
-      const stringFilter = 'string-filter';
+      it('throws when filter is a non-stringified object input', async () => {
+        const requestContext = new RequestContext();
+        const tool = createVectorQueryTool({
+          vectorStoreName: 'testStore',
+          indexName: 'testIndex',
+          model: mockModel,
+          enableFilter: true,
+        });
 
-      // Execute with string filter
-      await tool.execute?.(
-        {
-          queryText: 'test query',
-          topK: 5,
-          filter: stringFilter,
-        },
-        {
-          mastra: mockMastra as any,
-          requestContext,
-        },
-      );
-
-      // Since this is not a valid filter, it should be ignored
-      expect(vectorQuerySearch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          queryFilter: undefined,
-        }),
-      );
-    });
+        await expect(
+          tool.execute?.(
+            {
+              queryText: 'test query',
+              topK: 5,
+              filter: { field: 'value' } as any,
+            },
+            {
+              mastra: mockMastra as any,
+              requestContext,
+            },
+          ),
+        ).rejects.toThrow(/Invalid filter parameter/);
+        expect(vectorQuerySearch).not.toHaveBeenCalled();
+      });
 
     it('Returns early when no Mastra server or vector store is provided', async () => {
       const tool = createVectorQueryTool({

@@ -96,7 +96,10 @@ abstract class BaseFormatHandler<OUTPUT extends OutputSchema = undefined> {
   /**
    * Validates a value against the schema, preferring Zod's safeParse.
    */
-  protected async validateValue(value: unknown): Promise<ValidationResult<InferSchemaOutput<OUTPUT>>> {
+  protected async validateValue(
+    value: unknown,
+    context?: { rawResponse?: string; processedResponse?: string },
+  ): Promise<ValidationResult<InferSchemaOutput<OUTPUT>>> {
     if (!this.schema) {
       return {
         success: true,
@@ -113,6 +116,21 @@ abstract class BaseFormatHandler<OUTPUT extends OutputSchema = undefined> {
             value: result.data as InferSchemaOutput<OUTPUT>,
           };
         } else {
+          const details: Record<string, string> = {
+            value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+          };
+
+          if (context?.rawResponse !== undefined) {
+            details.rawResponse = context.rawResponse;
+          }
+
+          if (
+            context?.processedResponse !== undefined &&
+            context.processedResponse !== context.rawResponse
+          ) {
+            details.processedResponse = context.processedResponse;
+          }
+
           return {
             success: false,
             error: new MastraError(
@@ -121,9 +139,7 @@ abstract class BaseFormatHandler<OUTPUT extends OutputSchema = undefined> {
                 category: ErrorCategory.SYSTEM,
                 id: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED',
                 text: `Structured output validation failed\n${z4.prettifyError(result.error)}\n`,
-                details: {
-                  value: typeof value === 'object' ? JSON.stringify(value) : String(value),
-                },
+                details,
               },
               result.error,
             ),
@@ -270,10 +286,13 @@ class ObjectFormatHandler<OUTPUT extends OutputSchema = undefined> extends BaseF
         error: new Error('No object generated: could not parse the response.'),
       };
     }
-    const rawValue = this.preprocessText(finalRawValue);
-    const { value } = await parsePartialJson(rawValue);
+    const processedValue = this.preprocessText(finalRawValue);
+    const { value } = await parsePartialJson(processedValue);
 
-    return this.validateValue(value);
+    return this.validateValue(value, {
+      rawResponse: finalRawValue,
+      processedResponse: processedValue,
+    });
   }
 }
 
@@ -347,7 +366,7 @@ class ArrayFormatHandler<OUTPUT extends OutputSchema = undefined> extends BaseFo
     return { shouldEmit: false };
   }
 
-  async validateAndTransformFinal(_finalValue: string): Promise<ValidateAndTransformFinalResult<OUTPUT>> {
+  async validateAndTransformFinal(finalRawValue: string): Promise<ValidateAndTransformFinalResult<OUTPUT>> {
     const resultValue = this.textPreviousFilteredArray;
 
     if (!resultValue) {
@@ -357,7 +376,18 @@ class ArrayFormatHandler<OUTPUT extends OutputSchema = undefined> extends BaseFo
       };
     }
 
-    return this.validateValue(resultValue);
+    const processedValue = finalRawValue ? this.preprocessText(finalRawValue) : undefined;
+
+    return this.validateValue(
+      resultValue,
+      finalRawValue || processedValue
+        ? {
+            rawResponse: finalRawValue,
+            processedResponse:
+              processedValue && processedValue !== finalRawValue ? processedValue : undefined,
+          }
+        : undefined,
+    );
   }
 }
 
@@ -467,7 +497,10 @@ class EnumFormatHandler<OUTPUT extends OutputSchema = undefined> extends BaseFor
     }
 
     // Validate the unwrapped enum value
-    return this.validateValue(finalValue.result);
+    return this.validateValue(finalValue.result, {
+      rawResponse: rawFinalValue,
+      processedResponse: processedValue !== rawFinalValue ? processedValue : undefined,
+    });
   }
 }
 

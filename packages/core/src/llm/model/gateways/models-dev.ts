@@ -1,5 +1,8 @@
 import { createAnthropic } from '@ai-sdk/anthropic-v5';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock-v5';
+import { createAzure } from '@ai-sdk/azure-v5';
 import { createGoogleGenerativeAI } from '@ai-sdk/google-v5';
+import { createVertex } from '@ai-sdk/google-vertex-v5';
 import { createMistral } from '@ai-sdk/mistral-v5';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible-v5';
 import { createOpenAI } from '@ai-sdk/openai-v5';
@@ -24,6 +27,16 @@ interface ModelsDevProviderInfo {
 interface ModelsDevResponse {
   [providerId: string]: ModelsDevProviderInfo;
 }
+
+const CUSTOM_API_KEY_ENV_VARS: Record<string, string> = {
+  'amazon-bedrock': 'AWS_ACCESS_KEY_ID',
+  azure: 'AZURE_API_KEY',
+  'google-vertex': 'GOOGLE_APPLICATION_CREDENTIALS',
+};
+
+const AWS_REGION_ENV_FALLBACKS = ['AMAZON_BEDROCK_REGION', 'AWS_REGION', 'AWS_DEFAULT_REGION'];
+const GOOGLE_PROJECT_ENV_FALLBACKS = ['GOOGLE_VERTEX_PROJECT', 'GOOGLE_CLOUD_PROJECT', 'GCP_PROJECT'];
+const GOOGLE_LOCATION_ENV_FALLBACKS = ['GOOGLE_VERTEX_LOCATION', 'GOOGLE_CLOUD_REGION', 'GCP_REGION'];
 
 // Special cases: providers that are OpenAI-compatible but have their own SDKs
 // These providers work with OpenAI-compatible endpoints even though models.dev
@@ -55,6 +68,32 @@ const OPENAI_COMPATIBLE_OVERRIDES: Record<string, Partial<ProviderConfig>> = {
     apiKeyEnvVar: 'AI_GATEWAY_API_KEY',
   },
 };
+
+function resolveEnvValue(envNames: string[]): string | undefined {
+  for (const envName of envNames) {
+    if (envName && process.env[envName]) {
+      return process.env[envName];
+    }
+  }
+  return undefined;
+}
+
+function deriveApiKeyEnvVar(providerId: string, providerInfo: ModelsDevProviderInfo): string | string[] {
+  const envVars = providerInfo.env ?? [];
+  if (CUSTOM_API_KEY_ENV_VARS[providerId]) {
+    return CUSTOM_API_KEY_ENV_VARS[providerId];
+  }
+
+  if (envVars.length === 0) {
+    return `${providerId.toUpperCase().replace(/-/g, '_')}_API_KEY`;
+  }
+
+  if (envVars.length === 1) {
+    return envVars[0] ?? `${providerId.toUpperCase().replace(/-/g, '_')}_API_KEY`;
+  }
+
+  return envVars;
+}
 
 export class ModelsDevGateway extends MastraModelGateway {
   readonly id = 'models.dev';
@@ -100,22 +139,14 @@ export class ModelsDevGateway extends MastraModelGateway {
       const hasApiAndEnv = providerInfo.api && providerInfo.env && providerInfo.env.length > 0;
 
       if (isOpenAICompatible || hasInstalledPackage || hasApiAndEnv) {
-        // Get model IDs from the models object
         const modelIds = Object.keys(providerInfo.models).sort();
-
-        // Get the API URL from the provider info or overrides
         const url = providerInfo.api || OPENAI_COMPATIBLE_OVERRIDES[normalizedId]?.url;
 
-        // Skip if we don't have a URL
         if (!hasInstalledPackage && !url) {
           continue;
         }
 
-        // Get the API key env var from the provider info
-        // Convert hyphens to underscores for env var naming convention
-        const apiKeyEnvVar = providerInfo.env?.[0] || `${normalizedId.toUpperCase().replace(/-/g, '_')}_API_KEY`;
-
-        // Determine the API key header (special case for Anthropic)
+        const apiKeyEnvVar = deriveApiKeyEnvVar(normalizedId, providerInfo);
         const apiKeyHeader = !hasInstalledPackage
           ? OPENAI_COMPATIBLE_OVERRIDES[normalizedId]?.apiKeyHeader || 'Authorization'
           : undefined;
@@ -126,8 +157,10 @@ export class ModelsDevGateway extends MastraModelGateway {
           apiKeyHeader,
           name: providerInfo.name || providerId.charAt(0).toUpperCase() + providerId.slice(1),
           models: modelIds,
-          docUrl: providerInfo.doc, // Include documentation URL if available
+          docUrl: providerInfo.doc,
           gateway: `models.dev`,
+          packageName: providerInfo.npm,
+          requiredEnvVars: providerInfo.env?.length ? providerInfo.env : undefined,
         };
       }
     }
@@ -165,10 +198,31 @@ export class ModelsDevGateway extends MastraModelGateway {
       throw new Error(`Could not find config for provider ${provider} with model id ${modelId}`);
     }
 
-    const apiKey = typeof config.apiKeyEnvVar === `string` ? process.env[config.apiKeyEnvVar] : undefined; // we only use single string env var for models.dev for now
+    const envVars = Array.isArray(config.apiKeyEnvVar)
+      ? config.apiKeyEnvVar
+      : config.apiKeyEnvVar
+        ? [config.apiKeyEnvVar]
+        : [];
+
+    let apiKey: string | undefined;
+    let envVarName: string | undefined;
+    for (const env of envVars) {
+      if (env && process.env[env]) {
+        envVarName = env;
+        apiKey = process.env[env];
+        break;
+      }
+    }
 
     if (!apiKey) {
-      throw new Error(`Could not find API key process.env.${config.apiKeyEnvVar} for model id ${modelId}`);
+      if (PROVIDERS_WITH_INSTALLED_PACKAGES.includes(provider)) {
+        return Promise.resolve('');
+      }
+
+      envVarName = envVarName ?? envVars[0];
+      throw new Error(
+        `Could not find API key ${envVarName ? `process.env.${envVarName}` : 'environment variable'} for model id ${modelId}`,
+      );
     }
 
     return Promise.resolve(apiKey);
@@ -203,11 +257,94 @@ export class ModelsDevGateway extends MastraModelGateway {
         return createXai({
           apiKey,
         })(modelId);
+      case 'amazon-bedrock':
+        return this.resolveAmazonBedrockModel(modelId);
+      case 'azure':
+        return this.resolveAzureModel(modelId);
+      case 'google-vertex':
+        return this.resolveGoogleVertexModel(modelId);
       default:
         if (!baseURL) throw new Error(`No API URL found for ${providerId}/${modelId}`);
         return createOpenAICompatible({ name: providerId, apiKey, baseURL, supportsStructuredOutputs: true }).chatModel(
           modelId,
         );
     }
+  }
+
+  private resolveAmazonBedrockModel(modelId: string): LanguageModelV2 {
+    const region = resolveEnvValue(AWS_REGION_ENV_FALLBACKS);
+
+    if (!region) {
+      throw new Error('Amazon Bedrock requires AWS_REGION or AMAZON_BEDROCK_REGION to be set.');
+    }
+
+    const bedrockOptions: Parameters<typeof createAmazonBedrock>[0] = {
+      region,
+    };
+
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      bedrockOptions.accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+      bedrockOptions.secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    }
+
+    if (process.env.AWS_SESSION_TOKEN) {
+      bedrockOptions.sessionToken = process.env.AWS_SESSION_TOKEN;
+    }
+
+    const bedrock = createAmazonBedrock(bedrockOptions);
+    return bedrock(modelId);
+  }
+
+  private resolveAzureModel(modelId: string): LanguageModelV2 {
+    let resourceName = process.env.AZURE_RESOURCE_NAME || process.env.AZURE_OPENAI_RESOURCE;
+    const apiKey = process.env.AZURE_API_KEY || process.env.AZURE_OPENAI_API_KEY;
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+
+    if (!resourceName && endpoint) {
+      const match = endpoint.match(/https:\/\/([^.]+)\./);
+      resourceName = match?.[1];
+    }
+
+    if (!resourceName) {
+      throw new Error('Azure OpenAI requires AZURE_RESOURCE_NAME or AZURE_OPENAI_ENDPOINT to be set.');
+    }
+
+    if (!apiKey) {
+      throw new Error('Azure OpenAI requires AZURE_API_KEY or AZURE_OPENAI_API_KEY to be set.');
+    }
+
+    const azure = createAzure({
+      resourceName,
+      apiKey,
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION,
+    });
+
+    return azure(modelId);
+  }
+
+  private resolveGoogleVertexModel(modelId: string): LanguageModelV2 {
+    const project = resolveEnvValue(GOOGLE_PROJECT_ENV_FALLBACKS);
+    const location = resolveEnvValue(GOOGLE_LOCATION_ENV_FALLBACKS);
+
+    if (!project) {
+      throw new Error('Google Vertex AI requires GOOGLE_VERTEX_PROJECT (or GOOGLE_CLOUD_PROJECT) to be set.');
+    }
+
+    if (!location) {
+      throw new Error('Google Vertex AI requires GOOGLE_VERTEX_LOCATION (or GOOGLE_CLOUD_REGION) to be set.');
+    }
+
+    const googleAuthOptions: Record<string, string> = {};
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      googleAuthOptions.keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    }
+
+    const vertex = createVertex({
+      project,
+      location,
+      googleAuthOptions: Object.keys(googleAuthOptions).length ? googleAuthOptions : undefined,
+    });
+
+    return vertex(modelId);
   }
 }

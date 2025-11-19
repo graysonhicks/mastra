@@ -36,6 +36,7 @@ type ProcessOutputStreamOptions<OUTPUT extends OutputSchema = undefined> = {
     request: any;
     rawResponse: any;
   };
+  suppressErrorEvents?: boolean;
 };
 
 async function processOutputStream<OUTPUT extends OutputSchema = undefined>({
@@ -48,6 +49,7 @@ async function processOutputStream<OUTPUT extends OutputSchema = undefined>({
   controller,
   responseFromModel,
   includeRawChunks,
+  suppressErrorEvents,
 }: ProcessOutputStreamOptions<OUTPUT>) {
   for await (const chunk of outputStream._getBaseStream()) {
     if (!chunk) {
@@ -332,7 +334,7 @@ async function processOutputStream<OUTPUT extends OutputSchema = undefined>({
         });
         break;
 
-      case 'error':
+        case 'error':
         if (isAbortError(chunk.payload.error) && options?.abortSignal?.aborted) {
           break;
         }
@@ -348,11 +350,13 @@ async function processOutputStream<OUTPUT extends OutputSchema = undefined>({
           },
         });
 
-        const error = getErrorFromUnknown(chunk.payload.error, {
-          fallbackMessage: 'Unknown error in agent stream',
-        });
-        controller.enqueue({ ...chunk, payload: { ...chunk.payload, error } });
-        await options?.onError?.({ error });
+          const error = getErrorFromUnknown(chunk.payload.error, {
+            fallbackMessage: 'Unknown error in agent stream',
+          });
+          if (!suppressErrorEvents) {
+            controller.enqueue({ ...chunk, payload: { ...chunk.payload, error } });
+            await options?.onError?.({ error });
+          }
         break;
 
       default:
@@ -464,12 +468,13 @@ export function createLLMExecutionStep<Tools extends ToolSet = ToolSet, OUTPUT e
       let request: any;
       let rawResponse: any;
 
-      const { outputStream, callBail, runState } = await executeStreamWithFallbackModels<{
-        outputStream: MastraModelOutput<OUTPUT | undefined>;
-        runState: AgenticRunState;
-        callBail?: boolean;
-      }>(models)(async (model, isLastModel) => {
-        const runState = new AgenticRunState({
+        const { outputStream, callBail, runState } = await executeStreamWithFallbackModels<{
+          outputStream: MastraModelOutput<OUTPUT | undefined>;
+          runState: AgenticRunState;
+          callBail?: boolean;
+        }>(models)(async (model, isLastModel) => {
+          const messageListSnapshot = messageList.serialize();
+          const runState = new AgenticRunState({
           _internal: _internal!,
           model,
         });
@@ -617,6 +622,7 @@ export function createLLMExecutionStep<Tools extends ToolSet = ToolSet, OUTPUT e
               request,
               rawResponse,
             },
+              suppressErrorEvents: !isLastModel,
           });
         } catch (error) {
           console.error('Error in LLM Execution Step', error);
@@ -632,7 +638,7 @@ export function createLLMExecutionStep<Tools extends ToolSet = ToolSet, OUTPUT e
             return { callBail: true, outputStream, runState };
           }
 
-          if (isLastModel) {
+            if (isLastModel) {
             if (isControllerOpen(controller)) {
               controller.enqueue({
                 type: 'error',
@@ -642,17 +648,29 @@ export function createLLMExecutionStep<Tools extends ToolSet = ToolSet, OUTPUT e
               });
             }
 
-            runState.setState({
-              hasErrored: true,
-              stepResult: {
-                isContinued: false,
-                reason: 'error',
-              },
-            });
-          } else {
+              runState.setState({
+                hasErrored: true,
+                stepResult: {
+                  isContinued: false,
+                  reason: 'error',
+                },
+              });
+            } else {
+              messageList.deserialize(messageListSnapshot);
             throw error;
           }
         }
+
+          const finishReasonAfterStream =
+            runState.state.stepResult?.reason ?? outputStream._getImmediateFinishReason();
+          if (!isLastModel && (runState.state.hasErrored || finishReasonAfterStream === 'error')) {
+            messageList.deserialize(messageListSnapshot);
+            throw new Error(
+              runState.state.hasErrored
+                ? 'LLM stream emitted an error chunk before completion'
+                : 'LLM stream finished with an error reason',
+            );
+          }
 
         return { outputStream, callBail: false, runState };
       });

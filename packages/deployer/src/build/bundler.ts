@@ -10,7 +10,7 @@ import { optimizeLodashImports } from '@optimize-lodash/rollup-plugin';
 import { analyzeBundle } from './analyze';
 import { removeDeployer } from './plugins/remove-deployer';
 import { tsConfigPaths } from './plugins/tsconfig-paths';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { slash } from './utils';
 
 export async function getInputOptions(
@@ -67,13 +67,23 @@ export async function getInputOptions(
     plugins: [
       {
         name: 'alias-optimized-deps',
-        resolveId(id: string) {
+        resolveId(id: string, importer?: string) {
           if (!analyzedBundleInfo.dependencies.has(id)) {
             return null;
           }
 
           const filename = analyzedBundleInfo.dependencies.get(id)!;
           const absolutePath = join(workspaceRoot || projectRoot, filename);
+          const normalizedImporter = importer && importer.startsWith('\0') ? importer.slice(1) : importer;
+
+          if (normalizedImporter) {
+            const importerPath = resolvePath(normalizedImporter);
+            const targetPath = resolvePath(absolutePath);
+
+            if (importerPath === targetPath) {
+              return null;
+            }
+          }
 
           // During `mastra dev` we want to keep deps as external
           if (isDev) {

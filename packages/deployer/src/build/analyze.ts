@@ -14,6 +14,7 @@ import { bundleExternals } from './analyze/bundleExternals';
 import { getPackageInfo } from 'local-pkg';
 import { ErrorCategory, ErrorDomain, MastraError } from '@mastra/core/error';
 import { findNativePackageModule } from './utils';
+import { NON_OPTIMIZED_DEPENDENCIES } from './analyze/constants';
 
 type ErrorId = 'DEPLOYER_ANALYZE_MODULE_NOT_FOUND' | 'DEPLOYER_ANALYZE_MISSING_NATIVE_BUILD';
 
@@ -154,6 +155,10 @@ async function validateOutput(
     }
   }
 
+  for (const dep of NON_OPTIMIZED_DEPENDENCIES) {
+    result.externalDependencies.add(dep);
+  }
+
   return result;
 }
 
@@ -238,6 +243,10 @@ If you think your configuration is valid, please open an issue.`);
         depsToOptimize.set(dep, metadata);
       }
     }
+  }
+
+  for (const dep of NON_OPTIMIZED_DEPENDENCIES) {
+    depsToOptimize.delete(dep);
   }
 
   /**

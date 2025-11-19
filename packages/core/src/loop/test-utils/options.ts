@@ -25,6 +25,7 @@ import {
   testUsage2,
   createMessageListWithUserMessage,
 } from './utils';
+import { MessageList } from '../../agent/message-list';
 
 export function optionsTests({ loopFn, runId }: { loopFn: typeof loop; runId: string }) {
   describe('options.abortSignal', () => {
@@ -1367,6 +1368,117 @@ export function optionsTests({ loopFn, runId }: { loopFn: typeof loop; runId: st
             },
           ]
         `);
+      });
+    });
+
+    describe('prepareStep message preservation', () => {
+      it('should include system and semantic recall messages when overriding prompt messages', async () => {
+        const baseSystemPrompt = 'You are a helpful agent.';
+        const memorySystemPrompt = 'Memory: The user prefers TypeScript.';
+        const originalUserMessage = 'What language do I prefer?';
+        const prepareStepUserMessage = 'Please remind me of my preferred language.';
+
+        const messageList = new MessageList();
+        messageList.addSystem(baseSystemPrompt);
+        messageList.addSystem(memorySystemPrompt, 'memory');
+        messageList.add(
+          {
+            role: 'user',
+            content: [{ type: 'text', text: originalUserMessage }],
+          },
+          'input',
+        );
+
+        const doStreamCalls: Array<LanguageModelV2CallOptions> = [];
+        const prepareStepCalls: Array<{ messages: Array<any> }> = [];
+
+        const result = await loopFn({
+          methodType: 'stream',
+          runId,
+          models: [
+            {
+              id: 'test-model',
+              maxRetries: 0,
+              model: new MockLanguageModelV2({
+                doStream: async options => {
+                  doStreamCalls.push(options);
+                  return {
+                    stream: convertArrayToReadableStream([
+                      { type: 'text-start', id: '1' },
+                      { type: 'text-delta', id: '1', delta: 'Hello' },
+                      { type: 'text-end', id: '1' },
+                      {
+                        type: 'finish',
+                        finishReason: 'stop',
+                        usage: testUsage,
+                      },
+                    ]),
+                  };
+                },
+              }),
+            },
+          ],
+          messageList,
+          options: {
+            prepareStep: async args => {
+              prepareStepCalls.push(args);
+              return {
+                messages: [
+                  {
+                    role: 'user',
+                    content: [{ type: 'text', text: prepareStepUserMessage }],
+                  },
+                ],
+              };
+            },
+          },
+          agentId: 'agent-id',
+        });
+
+        await result.consumeStream();
+
+        expect(prepareStepCalls).toHaveLength(1);
+        const prepareStepMessageBatch = prepareStepCalls[0]?.messages ?? [];
+
+        expect(prepareStepMessageBatch).toHaveLength(3);
+        expect(prepareStepMessageBatch[0]).toMatchObject({
+          role: 'system',
+          content: baseSystemPrompt,
+        });
+        expect(prepareStepMessageBatch[1]).toMatchObject({
+          role: 'system',
+          content: memorySystemPrompt,
+        });
+        expect(prepareStepMessageBatch[2]).toMatchObject({
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: originalUserMessage,
+            },
+          ],
+        });
+
+        expect(doStreamCalls).toHaveLength(1);
+        const promptMessages = doStreamCalls[0]?.prompt ?? [];
+
+        expect(promptMessages[0]).toMatchObject({
+          role: 'system',
+          content: baseSystemPrompt,
+        });
+        expect(promptMessages[1]).toMatchObject({
+          role: 'system',
+          content: memorySystemPrompt,
+        });
+        expect(promptMessages[2]).toMatchObject({
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: prepareStepUserMessage,
+            },
+          ],
+        });
       });
     });
 

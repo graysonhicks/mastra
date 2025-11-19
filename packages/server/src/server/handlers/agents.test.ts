@@ -114,4 +114,16 @@ describe('getProvidersHandler', () => {
       expect(provider.models).toEqual([...registryEntry.models]);
     });
   });
+
+  it('should include external providers like Amazon Bedrock, Azure, and Google Vertex AI', async () => {
+    const result = await getProvidersHandler();
+    const providerIds = result.providers.map(provider => provider.id);
+
+    expect(providerIds).toEqual(expect.arrayContaining(['amazon-bedrock', 'azure', 'google-vertex']));
+
+    ['amazon-bedrock', 'azure', 'google-vertex'].forEach(providerId => {
+      const provider = result.providers.find(p => p.id === providerId);
+      expect(provider?.models?.length).toBeGreaterThan(0);
+    });
+  });
 });

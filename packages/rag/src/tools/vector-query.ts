@@ -39,7 +39,7 @@ export const createVectorQueryTool = (options: VectorQueryToolOptions) => {
       if (!vectorStoreName) throw new Error(`vectorStoreName is required, got: ${vectorStoreName}`); // won't fire
 
       const topK: number = requestContext?.get('topK') ?? inputData.topK ?? 10;
-      const filter: Record<string, any> = requestContext?.get('filter') ?? (inputData.filter as Record<string, any>);
+      const filter = requestContext?.get('filter') ?? inputData.filter;
       const queryText = inputData.queryText;
       const enableFilter = !!requestContext?.get('filter') || (options.enableFilter ?? false);
 
@@ -73,19 +73,38 @@ export const createVectorQueryTool = (options: VectorQueryToolOptions) => {
           return { relevantContext: [], sources: [] };
         }
         // Get relevant chunks from the vector database
-        let queryFilter = {};
-        if (enableFilter && filter) {
-          queryFilter = (() => {
+        const parseFilterOrThrow = (value: unknown): Record<string, any> => {
+          if (typeof value === 'string') {
             try {
-              return typeof filter === 'string' ? JSON.parse(filter) : filter;
+              return JSON.parse(value);
             } catch (error) {
-              // Log the error and use empty object
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              const message = `Invalid filter parameter: must be a valid JSON string or filter object. Details: ${errorMessage}`;
               if (logger) {
-                logger.warn('Failed to parse filter as JSON, using empty filter', { filter, error });
+                logger.error(message, { filter: value, error });
               }
-              return {};
+              const invalidFilterError = new Error(message, {
+                cause: error instanceof Error ? error : undefined,
+              });
+              invalidFilterError.name = 'InvalidFilterError';
+              throw invalidFilterError;
             }
-          })();
+          }
+          if (typeof value === 'object' && value !== null) {
+            return value as Record<string, any>;
+          }
+          const message = `Invalid filter parameter: must be a valid JSON string or filter object. Details: received ${typeof value}`;
+          if (logger) {
+            logger.error(message, { filter: value });
+          }
+          const invalidFilterError = new Error(message);
+          invalidFilterError.name = 'InvalidFilterError';
+          throw invalidFilterError;
+        };
+
+        let queryFilter: Record<string, any> | undefined;
+        if (enableFilter && filter !== undefined && filter !== null) {
+          queryFilter = parseFilterOrThrow(filter);
         }
         if (logger) {
           logger.debug('Prepared vector query parameters', { queryText, topK: topKValue, queryFilter, databaseConfig });
@@ -96,7 +115,7 @@ export const createVectorQueryTool = (options: VectorQueryToolOptions) => {
           vectorStore,
           queryText,
           model,
-          queryFilter: Object.keys(queryFilter || {}).length > 0 ? queryFilter : undefined,
+          queryFilter: queryFilter && Object.keys(queryFilter).length > 0 ? queryFilter : undefined,
           topK: topKValue,
           includeVectors,
           databaseConfig,
@@ -163,6 +182,9 @@ export const createVectorQueryTool = (options: VectorQueryToolOptions) => {
             errorMessage: err instanceof Error ? err.message : String(err),
             errorStack: err instanceof Error ? err.stack : undefined,
           });
+        }
+        if (err instanceof Error && err.name === 'InvalidFilterError') {
+          throw err;
         }
         return { relevantContext: [], sources: [] };
       }

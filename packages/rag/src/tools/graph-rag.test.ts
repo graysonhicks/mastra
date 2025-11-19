@@ -76,58 +76,143 @@ describe('createGraphRAGTool', () => {
     expect(() => tool.inputSchema?.parse({})).toThrow();
   });
 
-  describe('requestContext', () => {
-    it('calls vectorQuerySearch and GraphRAG with requestContext params', async () => {
-      const tool = createGraphRAGTool({
-        id: 'test',
-        model: mockModel,
-        indexName: 'testIndex',
-        vectorStoreName: 'testStore',
-      });
-      const requestContext = new RequestContext();
-      requestContext.set('indexName', 'anotherIndex');
-      requestContext.set('vectorStoreName', 'anotherStore');
-      requestContext.set('topK', 5);
-      requestContext.set('filter', { foo: 'bar' });
-      requestContext.set('randomWalkSteps', 99);
-      requestContext.set('restartProb', 0.42);
-      const result = await tool.execute(
-        {
-          queryText: 'foo',
-          topK: 2,
-        },
-        {
-          mastra: mockMastra as any,
-          requestContext,
-        },
-      );
-      expect(result.relevantContext).toEqual(['foo', 'bar']);
-      expect(result.sources.length).toBe(2);
-      expect(vectorQuerySearch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          indexName: 'anotherIndex',
-          vectorStore: {
-            anotherStore: {},
-          },
-          queryText: 'foo',
+    describe('requestContext', () => {
+      it('calls vectorQuerySearch and GraphRAG with requestContext params', async () => {
+        const tool = createGraphRAGTool({
+          id: 'test',
           model: mockModel,
-          queryFilter: { foo: 'bar' },
-          topK: 5,
-          includeVectors: true,
-        }),
-      );
-      // GraphRAG createGraph and query should be called
-      expect(GraphRAG).toHaveBeenCalled();
-      const instance = mockGraphRAGInstances[0];
-      expect(instance.createGraph).toHaveBeenCalled();
-      expect(instance.query).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: [1, 2, 3],
-          topK: 5,
-          randomWalkSteps: 99,
-          restartProb: 0.42,
-        }),
-      );
+          indexName: 'testIndex',
+          vectorStoreName: 'testStore',
+        });
+        const requestContext = new RequestContext();
+        requestContext.set('indexName', 'anotherIndex');
+        requestContext.set('vectorStoreName', 'anotherStore');
+        requestContext.set('topK', 5);
+        requestContext.set('filter', { foo: 'bar' });
+        requestContext.set('randomWalkSteps', 99);
+        requestContext.set('restartProb', 0.42);
+        const result = await tool.execute(
+          {
+            queryText: 'foo',
+            topK: 2,
+          },
+          {
+            mastra: mockMastra as any,
+            requestContext,
+          },
+        );
+        expect(result.relevantContext).toEqual(['foo', 'bar']);
+        expect(result.sources.length).toBe(2);
+        expect(vectorQuerySearch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            indexName: 'anotherIndex',
+            vectorStore: {
+              anotherStore: {},
+            },
+            queryText: 'foo',
+            model: mockModel,
+            queryFilter: { foo: 'bar' },
+            topK: 5,
+            includeVectors: true,
+          }),
+        );
+        // GraphRAG createGraph and query should be called
+        expect(GraphRAG).toHaveBeenCalled();
+        const instance = mockGraphRAGInstances[0];
+        expect(instance.createGraph).toHaveBeenCalled();
+        expect(instance.query).toHaveBeenCalledWith(
+          expect.objectContaining({
+            query: [1, 2, 3],
+            topK: 5,
+            randomWalkSteps: 99,
+            restartProb: 0.42,
+          }),
+        );
+      });
     });
-  });
+
+    describe('filter validation', () => {
+      const createFilterEnabledTool = () =>
+        createGraphRAGTool({
+          id: 'test',
+          model: mockModel,
+          indexName: 'testIndex',
+          vectorStoreName: 'testStore',
+          enableFilter: true,
+        });
+
+      const createContext = () => ({
+        mastra: mockMastra as any,
+        requestContext: new RequestContext(),
+      });
+
+      it('throws when filter is an invalid JSON string', async () => {
+        const tool = createFilterEnabledTool();
+        await expect(
+          tool.execute(
+            {
+              queryText: 'foo',
+              topK: 5,
+              filter: 'not-json',
+            },
+            createContext(),
+          ),
+        ).rejects.toThrow(/Invalid filter parameter/);
+        expect(vectorQuerySearch).not.toHaveBeenCalled();
+      });
+
+      it('throws when filter is a non-stringified object input', async () => {
+        const tool = createFilterEnabledTool();
+        await expect(
+          tool.execute(
+            {
+              queryText: 'foo',
+              topK: 5,
+              filter: { foo: 'bar' } as any,
+            },
+            createContext(),
+          ),
+        ).rejects.toThrow(/Invalid filter parameter/);
+        expect(vectorQuerySearch).not.toHaveBeenCalled();
+      });
+
+      it('accepts a valid JSON string filter', async () => {
+        const tool = createFilterEnabledTool();
+        await tool.execute(
+          {
+            queryText: 'foo',
+            topK: 5,
+            filter: '{"foo":"bar"}',
+          },
+          createContext(),
+        );
+        expect(vectorQuerySearch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            queryFilter: { foo: 'bar' },
+          }),
+        );
+      });
+
+      it('accepts a filter object supplied via requestContext', async () => {
+        const tool = createFilterEnabledTool();
+        const requestContext = new RequestContext();
+        requestContext.set('filter', { foo: 'bar' });
+
+        await tool.execute(
+          {
+            queryText: 'foo',
+            topK: 5,
+          },
+          {
+            mastra: mockMastra as any,
+            requestContext,
+          },
+        );
+        expect(vectorQuerySearch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            queryFilter: { foo: 'bar' },
+          }),
+        );
+      });
+    });
 });

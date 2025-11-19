@@ -1,7 +1,35 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@mastra/core/error', () => ({
+  ErrorCategory: { USER: 'USER', THIRD_PARTY: 'THIRD_PARTY' },
+  ErrorDomain: { MASTRA_VECTOR: 'MASTRA_VECTOR' },
+  MastraError: class MastraError extends Error {
+    constructor(public metadata: any, error?: Error) {
+      super(error?.message ?? 'MastraError');
+    }
+  },
+}));
+
+vi.mock('@mastra/core/utils', () => ({
+  parseSqlIdentifier: (name: string) => name,
+}));
+
+vi.mock('@mastra/core/vector', () => ({
+  MastraVector: class MastraVector {
+    logger = { debug: vi.fn(), info: vi.fn(), error: vi.fn(), warn: vi.fn(), trackException: vi.fn() };
+  },
+}));
+
+vi.mock('@mastra/core/vector/filter', () => ({
+  BaseFilterTranslator: class {
+    translate(filter: any) {
+      return filter;
+    }
+  },
+}));
+
 import type { PgVectorConfig } from '../shared/config';
 import { PgVector } from '.';
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type QueryCall = { text: string; values?: any[] };
 
@@ -12,19 +40,19 @@ const mockClient = {
   release: vi.fn(),
 };
 
-class MockPool {
-  public options: any;
-  public connect = vi.fn(async () => mockClient);
-  public end = vi.fn(async () => {});
+vi.mock('pg', () => {
+  class MockPool {
+    public options: any;
+    public connect = vi.fn(async () => mockClient);
+    public end = vi.fn(async () => {});
 
-  constructor(options: any) {
-    this.options = options;
+    constructor(options: any) {
+      this.options = options;
+    }
   }
-}
 
-vi.mock('pg', () => ({
-  Pool: MockPool,
-}));
+  return { Pool: MockPool };
+});
 
 describe('PgVector schema-aware vector type handling', () => {
   const config: PgVectorConfig & { id: string } = {

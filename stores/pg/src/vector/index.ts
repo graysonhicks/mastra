@@ -195,10 +195,6 @@ export class PgVector extends MastraVector<PGVectorFilter> {
       if (this.vectorExtensionSchema === 'pg_catalog') {
         return 'vector';
       }
-      // If it's in the current schema, return vector
-      if (this.vectorExtensionSchema === (this.schema || 'public')) {
-        return 'vector';
-      }
       // Otherwise, qualify it with the schema where vector extension is installed
       const validatedSchema = parseSqlIdentifier(this.vectorExtensionSchema, 'vector extension schema');
       return `${validatedSchema}.vector`;

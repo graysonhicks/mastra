@@ -10,7 +10,7 @@ import { ChunkFrom } from '../types';
 import { createObjectStreamTransformer } from './output-format-handlers';
 
 describe('output-format-handlers', () => {
-  describe('schema validation', () => {
+    describe('schema validation', () => {
     it('should validate against zod schema and provide detailed error messages', async () => {
       const schema = z.object({
         name: z.string().min(3),
@@ -331,6 +331,43 @@ describe('output-format-handlers', () => {
       expect(errorChunk).toBeDefined();
       expect((errorChunk?.payload?.error as Error)?.message).toContain('Structured output validation failed');
     });
+
+      it('should include raw model response in validation error details', async () => {
+        const schema = z.object({
+          name: z.string(),
+        });
+
+        const transformer = createObjectStreamTransformer({
+          structuredOutput: { schema },
+        });
+
+        const streamParts: ChunkType<typeof schema>[] = [
+          {
+            type: 'text-delta',
+            runId: 'test-run',
+            from: ChunkFrom.AGENT,
+            payload: { id: '1', text: '{"name":123}' },
+          },
+          {
+            type: 'text-end',
+            runId: 'test-run',
+            from: ChunkFrom.AGENT,
+            payload: { id: '1' },
+          },
+        ];
+
+        // @ts-expect-error - web/stream readable stream type error
+        const stream = convertArrayToReadableStream(streamParts).pipeThrough(transformer);
+        const chunks = await convertAsyncIterableToArray(stream);
+
+        const errorChunk = chunks.find(c => c?.type === 'error');
+        expect(errorChunk).toBeDefined();
+        const mastraError = errorChunk?.payload?.error as Error & { details?: Record<string, unknown> };
+        expect(mastraError).toBeDefined();
+        expect(mastraError.message).toContain('Structured output validation failed');
+        expect(mastraError.details?.rawResponse).toBe('{"name":123}');
+        expect(mastraError.details?.value).toBe('{"name":123}');
+      });
   });
 
   describe('zod v3 compatibility', () => {

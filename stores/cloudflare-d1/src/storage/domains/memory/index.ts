@@ -664,24 +664,24 @@ export class MemoryStorageD1 extends MemoryStorage {
         queryParams.push(resourceId);
       }
 
-      const dateRange = filter?.dateRange;
-      if (dateRange?.start) {
-        const startDate =
-          dateRange.start instanceof Date ? serializeDate(dateRange.start) : serializeDate(new Date(dateRange.start));
-        query += ` AND createdAt >= ?`;
-        queryParams.push(startDate);
-      }
+        const dateRange = filter?.dateRange;
+        if (dateRange?.start) {
+          const startDate =
+            dateRange.start instanceof Date ? serializeDate(dateRange.start) : serializeDate(new Date(dateRange.start));
+          query += ` AND createdAt >= ?`;
+          queryParams.push(startDate);
+        }
 
-      if (dateRange?.end) {
-        const endDate =
-          dateRange.end instanceof Date ? serializeDate(dateRange.end) : serializeDate(new Date(dateRange.end));
-        query += ` AND createdAt <= ?`;
-        queryParams.push(endDate);
-      }
+        if (dateRange?.end) {
+          const endDate =
+            dateRange.end instanceof Date ? serializeDate(dateRange.end) : serializeDate(new Date(dateRange.end));
+          query += ` AND createdAt <= ?`;
+          queryParams.push(endDate);
+        }
 
-      // Build ORDER BY clause
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
-      query += ` ORDER BY "${field}" ${direction}`;
+        // Build ORDER BY clause
+        const { field, direction } = this.parseOrderBy(orderBy);
+        query += ` ORDER BY "${field}" ${direction}`;
 
       // Apply pagination
       if (perPage !== Number.MAX_SAFE_INTEGER) {

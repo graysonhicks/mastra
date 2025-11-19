@@ -529,7 +529,7 @@ export class MemoryMSSQL extends MemoryStorage {
 
     try {
       // Determine sort field and direction
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+        const { field, direction } = this.parseOrderBy(orderBy);
       const orderByStatement = `ORDER BY [${field}] ${direction}, [seq_id] ${direction}`;
 
       const tableName = getTableName({ indexName: TABLE_MESSAGES, schemaName: getSchemaName(this.schema) });

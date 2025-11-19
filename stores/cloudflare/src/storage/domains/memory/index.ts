@@ -744,7 +744,7 @@ export class MemoryStorageCloudflare extends MemoryStorage {
       }
 
       // Determine sort field and direction
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+        const { field, direction } = this.parseOrderBy(orderBy);
 
       const messageIds = new Set<string>();
 

@@ -401,6 +401,18 @@ export function transformWorkflow<TOutput extends ZodType<any>>(
         },
       } as const;
     }
+    case 'workflow-step-output': {
+      const outputChunk = payload.payload?.output;
+      if (outputChunk && isDataChunkType(outputChunk)) {
+        if (!('data' in outputChunk)) {
+          throw new Error(
+            `UI Messages require a data property when using data- prefixed chunks \n ${JSON.stringify(outputChunk)}`,
+          );
+        }
+        return outputChunk;
+      }
+      return payload;
+    }
     case 'workflow-step-result': {
       const current = bufferedWorkflows.get(payload.runId!);
       if (!current) return null;

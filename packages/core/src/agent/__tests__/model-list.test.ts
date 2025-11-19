@@ -721,6 +721,169 @@ function modelListTests(version: 'v1' | 'v2') {
         expect(usedModelName).toBe('premium');
       });
 
+      it('should trigger fallback when the first OpenAI model streams an error chunk (bad API key) without leaking state', async () => {
+        const invocationOrder: string[] = [];
+
+        const badKeyModel = new MockLanguageModelV2({
+          doStream: async () => {
+            invocationOrder.push('bad-key');
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              warnings: [],
+              stream: convertArrayToReadableStream([
+                {
+                  type: 'stream-start',
+                  warnings: [],
+                },
+                {
+                  type: 'response-metadata',
+                  id: 'invalid-key',
+                  modelId: 'openai/bad-model',
+                  timestamp: new Date(0),
+                },
+                {
+                  type: 'error',
+                  error: new Error('Incorrect API key provided: TestKey'),
+                },
+                {
+                  type: 'finish',
+                  finishReason: 'error',
+                  usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+                },
+              ]),
+            };
+          },
+        });
+
+        const goodKeyModel = new MockLanguageModelV2({
+          doStream: async () => {
+            invocationOrder.push('good-key');
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              warnings: [],
+              stream: convertArrayToReadableStream([
+                {
+                  type: 'stream-start',
+                  warnings: [],
+                },
+                {
+                  type: 'response-metadata',
+                  id: 'valid-key',
+                  modelId: 'openai/good-model',
+                  timestamp: new Date(0),
+                },
+                { type: 'text-start', id: '1' },
+                { type: 'text-delta', id: '1', delta: 'Fallback ' },
+                { type: 'text-delta', id: '1', delta: 'success' },
+                { type: 'text-end', id: '1' },
+                {
+                  type: 'finish',
+                  finishReason: 'stop',
+                  usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+                },
+              ]),
+            };
+          },
+        });
+
+        const agent = new Agent({
+          id: 'openai-fallback-agent',
+          name: 'Fallback Agent',
+          instructions: 'Test fallback pipeline',
+          model: [
+            { model: badKeyModel },
+            { model: goodKeyModel },
+          ],
+        });
+
+        const streamResult = await agent.stream('Trigger fallback');
+        const text = await streamResult.text;
+        expect(text).toBe('Fallback success');
+        expect(invocationOrder).toEqual(['bad-key', 'good-key']);
+      });
+
+      it('should fallback when the first model finishes with an error reason (quota exceeded)', async () => {
+        const invocationOrder: string[] = [];
+
+        const quotaLimitedModel = new MockLanguageModelV2({
+          doStream: async () => {
+            invocationOrder.push('quota-exceeded');
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              warnings: [],
+              stream: convertArrayToReadableStream([
+                {
+                  type: 'stream-start',
+                  warnings: [],
+                },
+                {
+                  type: 'response-metadata',
+                  id: 'quota-error',
+                  modelId: 'openai/quota',
+                  timestamp: new Date(0),
+                },
+                {
+                  type: 'finish',
+                  finishReason: 'error',
+                  usage: { inputTokens: 10, outputTokens: 0, totalTokens: 10 },
+                  response: {
+                    body: {
+                      error: { message: 'You exceeded your current quota, please check your plan and billing details' },
+                    },
+                  },
+                },
+              ]),
+            };
+          },
+        });
+
+        const healthyModel = new MockLanguageModelV2({
+          doStream: async () => {
+            invocationOrder.push('healthy');
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              warnings: [],
+              stream: convertArrayToReadableStream([
+                {
+                  type: 'stream-start',
+                  warnings: [],
+                },
+                {
+                  type: 'response-metadata',
+                  id: 'healthy-model',
+                  modelId: 'openai/healthy',
+                  timestamp: new Date(0),
+                },
+                { type: 'text-start', id: '1' },
+                { type: 'text-delta', id: '1', delta: 'Recovered ' },
+                { type: 'text-delta', id: '1', delta: 'output' },
+                { type: 'text-end', id: '1' },
+                {
+                  type: 'finish',
+                  finishReason: 'stop',
+                  usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+                },
+              ]),
+            };
+          },
+        });
+
+        const agent = new Agent({
+          id: 'quota-fallback-agent',
+          name: 'Quota Agent',
+          instructions: 'Test quota fallback',
+          model: [
+            { model: quotaLimitedModel },
+            { model: healthyModel },
+          ],
+        });
+
+        const streamResult = await agent.stream('Trigger quota fallback');
+        const text = await streamResult.text;
+        expect(text).toBe('Recovered output');
+        expect(invocationOrder).toEqual(['quota-exceeded', 'healthy']);
+      });
+
       it('should throw an error if a v1 model is provided in an array of models', async () => {
         const v1Model = new MockLanguageModelV1({
           doStream: async () => ({

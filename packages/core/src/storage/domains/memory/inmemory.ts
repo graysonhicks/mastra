@@ -110,7 +110,7 @@ export class InMemoryMemory extends MemoryStorage {
 
     const threadIdSet = new Set(threadIds);
 
-    const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+    const { field, direction } = this.parseOrderBy(orderBy);
 
     // Normalize perPage for query (false → MAX_SAFE_INTEGER, 0 → 0, undefined → 40)
     const perPage = normalizePerPage(perPageInput, 40);

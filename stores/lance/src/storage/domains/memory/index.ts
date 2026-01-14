@@ -262,7 +262,7 @@ export class StoreMemoryLance extends MemoryStorage {
       }
 
       // Determine sort field and direction
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+      const { field, direction } = this.parseOrderBy(orderBy);
 
       const table = await this.client.openTable(TABLE_MESSAGES);
 

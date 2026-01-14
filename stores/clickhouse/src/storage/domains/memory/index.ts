@@ -207,7 +207,7 @@ export class MemoryStorageClickhouse extends MemoryStorage {
       }
 
       // Build ORDER BY clause
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+      const { field, direction } = this.parseOrderBy(orderBy);
       dataQuery += ` ORDER BY "${field}" ${direction}`;
 
       // Apply pagination

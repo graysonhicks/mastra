@@ -150,39 +150,37 @@ export function createListMessagesTest({ storage }: { storage: MastraStorage }) 
       expect(result).toEqual([]);
     });
 
-    it('should maintain message order', async () => {
-      const thread = createSampleThread();
-      await storage.saveThread({ thread });
+      it('should default to newest-first ordering', async () => {
+        const thread = createSampleThread();
+        await storage.saveThread({ thread });
 
-      const messages = [
-        createSampleMessageV2({
-          threadId: thread.id,
-          content: { content: 'First' },
-          createdAt: new Date(Date.now() + 1),
-        }),
-        createSampleMessageV2({
-          threadId: thread.id,
-          content: { content: 'Second' },
-          createdAt: new Date(Date.now() + 2),
-        }),
-        createSampleMessageV2({
-          threadId: thread.id,
-          content: { content: 'Third' },
-          createdAt: new Date(Date.now() + 3),
-        }),
-      ];
+        const messages = [
+          createSampleMessageV2({
+            threadId: thread.id,
+            content: { content: 'First' },
+            createdAt: new Date(Date.now() + 1),
+          }),
+          createSampleMessageV2({
+            threadId: thread.id,
+            content: { content: 'Second' },
+            createdAt: new Date(Date.now() + 2),
+          }),
+          createSampleMessageV2({
+            threadId: thread.id,
+            content: { content: 'Third' },
+            createdAt: new Date(Date.now() + 3),
+          }),
+        ];
 
-      await storage.saveMessages({ messages });
+        await storage.saveMessages({ messages });
 
-      const { messages: retrievedMessages } = await storage.listMessages({ threadId: thread.id });
+        const { messages: retrievedMessages } = await storage.listMessages({ threadId: thread.id });
 
-      expect(retrievedMessages).toHaveLength(3);
+        expect(retrievedMessages).toHaveLength(3);
 
-      // Verify order is maintained
-      retrievedMessages.forEach((msg, idx) => {
-        expect(msg.content.content).toBe(messages[idx]?.content.content);
+        const contents = retrievedMessages.map(msg => msg.content.content);
+        expect(contents).toEqual(['Third', 'Second', 'First']);
       });
-    });
 
     it('should rollback on error during message save', async () => {
       const thread = createSampleThread();
@@ -265,20 +263,20 @@ export function createListMessagesTest({ storage }: { storage: MastraStorage }) 
 
       await storage.saveMessages({ messages: messages });
 
-      const { messages: retrievedMessages } = await storage.listMessages({ threadId: thread.id });
-      expect(retrievedMessages).toHaveLength(3);
-      const contentParts = retrievedMessages.map((m: MastraDBMessage) => m.content.content);
-      expect(contentParts).toEqual(['First', 'Second', 'Third']);
+        const { messages: retrievedMessages } = await storage.listMessages({ threadId: thread.id });
+        expect(retrievedMessages).toHaveLength(3);
+        const contentParts = retrievedMessages.map((m: MastraDBMessage) => m.content.content);
+        expect(contentParts).toEqual(['Third', 'Second', 'First']);
 
       const { messages: retrievedMessages2 } = await storage.listMessages({ threadId: thread2.id });
       expect(retrievedMessages2).toHaveLength(3);
       const contentParts2 = retrievedMessages2.map((m: MastraDBMessage) => m.content.content);
-      expect(contentParts2).toEqual(['Fourth', 'Fifth', 'Sixth']);
+        expect(contentParts2).toEqual(['Sixth', 'Fifth', 'Fourth']);
 
       const { messages: retrievedMessages3 } = await storage.listMessages({ threadId: thread3.id });
       expect(retrievedMessages3).toHaveLength(2);
       const contentParts3 = retrievedMessages3.map((m: MastraDBMessage) => m.content.content);
-      expect(contentParts3).toEqual(['Seventh', 'Eighth']);
+        expect(contentParts3).toEqual(['Eighth', 'Seventh']);
 
       const { messages: crossThreadMessages } = await storage.listMessages({
         threadId: thread.id,

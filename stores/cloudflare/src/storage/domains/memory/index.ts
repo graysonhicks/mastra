@@ -793,7 +793,7 @@ export class MemoryStorageCloudflare extends MemoryStorage {
       }
 
       // Determine sort field and direction
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+        const { field, direction } = this.parseOrderBy(orderBy);
 
       // Step 1: Get thread messages from all specified threads (for pagination)
       const threadMessageIds = new Set<string>();

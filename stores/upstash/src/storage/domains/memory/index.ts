@@ -644,8 +644,8 @@ export class StoreMemoryUpstash extends MemoryStorage {
         messagesData = messagesData.filter(msg => new Date(msg.createdAt).getTime() <= toDate.getTime());
       }
 
-      // Determine sort field and direction, default to ASC (oldest first)
-      const { field, direction } = this.parseOrderBy(orderBy, 'ASC');
+        // Determine sort field and direction, default to DESC (newest first)
+      const { field, direction } = this.parseOrderBy(orderBy);
 
       // Type-safe field accessor helper
       const getFieldValue = (msg: MastraDBMessage): number => {
